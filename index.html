@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playwright Test Agents — 三个 Agent 全自动写测试</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* ========== 设计令牌（Design Tokens）========== */
+        :root {
+            /* 色彩系统 - 科技创新风 */
+            --color-primary: #7C3AED;
+            --color-primary-light: #A78BFA;
+            --color-primary-dark: #5B21B6;
+            --color-accent: #06B6D4;
+            --color-accent-light: #22D3EE;
+            --color-text-primary: #0F172A;
+            --color-text-secondary: #334155;
+            --color-text-tertiary: #94A3B8;
+            --color-bg-primary: #FFFFFF;
+            --color-bg-secondary: #F8FAFC;
+            --color-border: #E2E8F0;
+
+            /* 字体系统 */
+            --font-sans: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+            --font-serif: "Playfair Display", "Noto Serif SC", serif;
+            --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+
+            /* 间距系统 */
+            --space-unit: 8px;
+            --content-max-width: 1200px;
+            --slide-padding-x: 10%;
+            --slide-padding-top: 80px;
+            --slide-padding-bottom: 60px;
+
+            /* 动效系统 */
+            --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+            --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+            --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+            --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+            --duration-fast: 150ms;
+            --duration-normal: 400ms;
+            --duration-slow: 600ms;
+
+            /* 阴影系统 */
+            --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.06);
+            --shadow-md: 0 4px 6px rgba(15,23,42,0.04), 0 2px 4px rgba(15,23,42,0.06);
+            --shadow-lg: 0 10px 15px rgba(15,23,42,0.06), 0 4px 6px rgba(15,23,42,0.04);
+
+            /* 圆角系统 */
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+        }
+
+        /* ========== 全局重置 ========== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html {
+            scroll-behavior: smooth;
+            scroll-snap-type: y mandatory;
+            overflow-x: hidden;
+        }
+        body {
+            font-family: var(--font-sans);
+            color: var(--color-text-primary);
+            background: var(--color-bg-primary);
+            overflow-x: hidden;
+        }
+
+        /* ========== 幻灯片基础 ========== */
+        .slide {
+            width: 100vw;
+            height: 100vh;
+            scroll-snap-align: start;
+            scroll-snap-stop: always;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            background: var(--color-bg-primary);
+        }
+        .slide-content {
+            max-width: var(--content-max-width);
+            width: 100%;
+            margin: 0 auto;
+            padding: var(--slide-padding-top) var(--slide-padding-x) var(--slide-padding-bottom);
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ========== 图片展示系统 ========== */
+        .img-bg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+        .img-bg-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+        }
+        .slide-content { position: relative; z-index: 2; }
+
+        .img-content {
+            width: 100%;
+            max-height: 400px;
+            object-fit: contain;
+            border-radius: var(--radius-md);
+        }
+        .img-icon {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+        .img-icon-lg {
+            width: 64px;
+            height: 64px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+        .img-avatar {
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        .img-logo {
+            max-height: 48px;
+            width: auto;
+            object-fit: contain;
+        }
+        .img-full {
+            width: 100%;
+            height: auto;
+            border-radius: var(--radius-lg);
+            object-fit: cover;
+        }
+        .img-split {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: var(--radius-lg);
+        }
+
+        /* 图片加载失败占位符 */
+        img[data-fallback] { position: relative; }
+        img[data-fallback].error {
+            background: var(--color-bg-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* ========== 入场动画 ========== */
+        .animate-in {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity var(--duration-slow) var(--ease-enter),
+                        transform var(--duration-slow) var(--ease-enter);
+        }
+        .animate-in.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .stagger > *:nth-child(1) { transition-delay: 0ms; }
+        .stagger > *:nth-child(2) { transition-delay: 100ms; }
+        .stagger > *:nth-child(3) { transition-delay: 200ms; }
+        .stagger > *:nth-child(4) { transition-delay: 300ms; }
+        .stagger > *:nth-child(5) { transition-delay: 400ms; }
+        .stagger > *:nth-child(6) { transition-delay: 500ms; }
+
+        /* ========== 交互控件公共样式 ========== */
+        .control-btn {
+            background: rgba(255,255,255,0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity var(--duration-fast) var(--ease-standard),
+                        background var(--duration-fast) var(--ease-standard),
+                        transform var(--duration-fast) var(--ease-standard);
+        }
+        .control-btn:hover {
+            background: rgba(255,255,255,0.95);
+        }
+
+        /* ========== 全屏按钮 ========== */
+        #fullscreen-btn {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 1000;
+            width: 44px;
+            height: 44px;
+            opacity: 0.3;
+        }
+        #fullscreen-btn:hover {
+            opacity: 1;
+            transform: scale(1.05);
+        }
+        #fullscreen-btn svg {
+            width: 20px;
+            height: 20px;
+            color: var(--color-text-primary);
+        }
+
+        /* ========== 翻页箭头 ========== */
+        #nav-arrows {
+            position: fixed;
+            right: 24px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            opacity: 0.2;
+            transition: opacity var(--duration-normal) var(--ease-standard);
+        }
+        #nav-arrows:hover { opacity: 1; }
+        #nav-arrows .control-btn { width: 40px; height: 40px; }
+        #nav-arrows .control-btn.disabled { opacity: 0.1; pointer-events: none; }
+        #nav-arrows .control-btn svg { width: 18px; height: 18px; color: var(--color-text-primary); }
+
+        /* ========== 页面指示器 ========== */
+        #slide-indicator {
+            position: fixed;
+            right: 24px;
+            top: 50%;
+            transform: translateY(calc(-50% + 60px));
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            opacity: 0.2;
+            transition: opacity var(--duration-normal) var(--ease-standard);
+        }
+        #nav-arrows:hover ~ #slide-indicator,
+        #slide-indicator:hover { opacity: 1; }
+        .indicator-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--color-border);
+            cursor: pointer;
+            transition: all var(--duration-fast) var(--ease-standard);
+        }
+        .indicator-dot.active {
+            background: var(--color-primary);
+            transform: scale(1.4);
+        }
+        .indicator-dot:hover {
+            background: var(--color-primary);
+            transform: scale(1.2);
+        }
+        #slide-counter {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--color-text-tertiary);
+            margin-top: 4px;
+        }
+
+        /* ========== 组件样式 ========== */
+        .card {
+            background: var(--color-bg-primary);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 32px;
+            transition: transform var(--duration-normal) var(--ease-standard),
+                        box-shadow var(--duration-normal) var(--ease-standard);
+        }
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+        .stat-number {
+            font-family: var(--font-mono);
+            font-size: 3.5rem;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            color: var(--color-primary);
+        }
+
+        /* ========== 自定义扩展样式 ========== */
+        .gradient-text {
+            background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .code-block {
+            background: #1E1B2E;
+            color: #E2E8F0;
+            border-radius: var(--radius-md);
+            padding: 24px 28px;
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+            line-height: 1.7;
+            overflow-x: auto;
+        }
+        .code-block .comment { color: #6B7280; }
+        .code-block .keyword { color: #A78BFA; }
+        .code-block .string { color: #34D399; }
+        .code-block .func { color: #60A5FA; }
+
+        .agent-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            border-radius: 999px;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            letter-spacing: 0.025em;
+        }
+        .badge-planner { background: #EDE9FE; color: #6D28D9; }
+        .badge-generator { background: #DBEAFE; color: #1D4ED8; }
+        .badge-healer { background: #D1FAE5; color: #047857; }
+
+        .flow-arrow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--color-primary);
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .page-number {
+            position: absolute;
+            bottom: 24px;
+            right: var(--slide-padding-x);
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--color-text-tertiary);
+        }
+
+        .icon-circle {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+        .icon-circle-purple { background: #EDE9FE; }
+        .icon-circle-blue { background: #DBEAFE; }
+        .icon-circle-green { background: #D1FAE5; }
+        .icon-circle-cyan { background: #CFFAFE; }
+        .icon-circle-amber { background: #FEF3C7; }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.875rem;
+        }
+        .comparison-table th {
+            background: var(--color-bg-secondary);
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--color-text-secondary);
+            border-bottom: 2px solid var(--color-primary);
+        }
+        .comparison-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+        .comparison-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+        .comparison-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--color-border);
+            color: var(--color-text-secondary);
+        }
+        .comparison-table tr:last-child td { border-bottom: none; }
+        .comparison-table .highlight-cell {
+            color: var(--color-primary);
+            font-weight: 600;
+        }
+
+        .warning-card {
+            background: #FFFBEB;
+            border: 1px solid #FDE68A;
+            border-radius: var(--radius-md);
+            padding: 20px 24px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+        .tip-card {
+            background: #F0FDF4;
+            border: 1px solid #BBF7D0;
+            border-radius: var(--radius-md);
+            padding: 20px 24px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        /* ========== 封面页特殊背景 ========== */
+        .cover-bg {
+            background: linear-gradient(135deg, #1E1B2E 0%, #2D1B69 40%, #1E3A5F 100%);
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+        }
+        .cover-bg::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 20% 50%, rgba(124,58,237,0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(6,182,212,0.25) 0%, transparent 50%),
+                radial-gradient(circle at 60% 80%, rgba(124,58,237,0.15) 0%, transparent 50%);
+        }
+
+        .end-bg {
+            background: linear-gradient(135deg, #1E1B2E 0%, #2D1B69 40%, #1E3A5F 100%);
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+        }
+        .end-bg::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 50% 40%, rgba(6,182,212,0.2) 0%, transparent 60%),
+                radial-gradient(circle at 30% 70%, rgba(124,58,237,0.2) 0%, transparent 50%);
+        }
+
+        /* ========== 无障碍 ========== */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ==================== P1: 封面 ==================== -->
+    <section class="slide" data-slide="0">
+        <div class="cover-bg"></div>
+        <div class="slide-content" style="justify-content: center; align-items: center; text-align: center;">
+            <div style="margin-bottom: 24px;">
+                <span style="display:inline-block; background: rgba(124,58,237,0.3); color: #C4B5FD; padding: 6px 20px; border-radius: 999px; font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.05em;">PLAYWRIGHT TEST AGENTS</span>
+            </div>
+            <h1 style="font-size: 4.5rem; font-weight: 800; line-height: 1.1; color: #FFFFFF; margin-bottom: 24px; max-width: 900px;">
+                三个 Agent<br><span class="gradient-text" style="-webkit-text-fill-color: unset; background: linear-gradient(135deg, #A78BFA 0%, #22D3EE 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">全自动写测试</span>
+            </h1>
+            <p style="font-size: 1.25rem; color: #94A3B8; max-width: 600px; line-height: 1.6; margin-bottom: 48px;">
+                你告诉它测什么，它自己探索、自己写代码、跑失败了还能自己修
+            </p>
+            <div style="display: flex; gap: 16px; align-items: center; justify-content: center;">
+                <span style="color: #64748B; font-size: 0.875rem;">技术分享</span>
+                <span style="color: #475569; font-size: 0.875rem;">|</span>
+                <span style="color: #64748B; font-size: 0.875rem;">2026</span>
+            </div>
+        </div>
+        <div class="page-number" style="color: #475569;">01 / 12</div>
+    </section>
+
+    <!-- ==================== P2: 痛点引子 ==================== -->
+    <section class="slide" data-slide="1">
+        <div class="slide-content">
+            <div class="animate-in">
+                <p style="font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-primary); font-weight: 600; margin-bottom: 12px; letter-spacing: 0.05em;">THE PROBLEM</p>
+                <h1 style="font-size: 2.75rem; font-weight: 700; line-height: 1.2; margin-bottom: 48px; color: var(--color-text-primary);">
+                    写测试这件事，<br>大家都知道重要，但……
+                </h1>
+            </div>
+            <div class="stagger" style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px; flex: 1; align-items: start;">
+                <div class="card animate-in" style="border-left: 4px solid #EF4444;">
+                    <div style="font-size: 2rem; margin-bottom: 12px;">😩</div>
+                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">手动写测试太耗时</h3>
+                    <p style="color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6;">一个中等项目几百个测试用例，逐个手写成本巨大，往往是"赶完功能就算了"</p>
+                </div>
+                <div class="card animate-in" style="border-left: 4px solid #F59E0B;">
+                    <div style="font-size: 2rem; margin-bottom: 12px;">🔄</div>
+                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">页面一改测试就挂</h3>
+                    <p style="color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6;">选择器变了、文案变了、流程变了……修测试比写测试还痛苦</p>
+                </div>
+                <div class="card animate-in" style="border-left: 4px solid #8B5CF6;">
+                    <div style="font-size: 2rem; margin-bottom: 12px;">📉</div>
+                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">测试覆盖率上不去</h3>
+                    <p style="color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6;">核心流程勉强覆盖，边界情况和异常路径永远没人管</p>
+                </div>
+                <div class="card animate-in" style="border-left: 4px solid var(--color-accent);">
+                    <div style="font-size: 2rem; margin-bottom: 12px;">🤖</div>
+                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">AI 能不能帮我干？</h3>
+                    <p style="color: var(--color-primary); font-size: 0.9375rem; font-weight: 500; line-height: 1.6;">Playwright 官方的回答是：可以，而且全程不用你盯着</p>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">02 / 12</div>
+    </section>
+
+    <!-- ==================== P3: 什么是 Test Agents ==================== -->
+    <section class="slide" data-slide="2">
+        <div class="slide-content" style="justify-content: center; align-items: center; text-align: center;">
+            <div class="animate-in">
+                <p style="font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-primary); font-weight: 600; margin-bottom: 16px; letter-spacing: 0.05em;">INTRODUCING</p>
+                <h1 style="font-size: 2.75rem; font-weight: 700; line-height: 1.2; margin-bottom: 32px;">
+                    什么是 Test Agents？
+                </h1>
+                <p style="font-size: 1.125rem; color: var(--color-text-secondary); max-width: 700px; line-height: 1.7; margin-bottom: 48px;">
+                    Playwright 官方推出的 AI 测试系统。包含<strong style="color: var(--color-primary);">三个专门干测试的 AI Agent</strong>，形成完整的"测试自动化链路"。
+                </p>
+            </div>
+            <div class="stagger" style="display: flex; gap: 24px; justify-content: center; align-items: center;">
+                <div class="card animate-in" style="text-align: center; padding: 32px 40px; min-width: 200px;">
+                    <div class="icon-circle icon-circle-purple" style="margin: 0 auto 16px;">🗺️</div>
+                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 4px;">Planner</h3>
+                    <p style="font-size: 0.8125rem; color: var(--color-text-tertiary);">规划者</p>
+                </div>
+                <div style="color: var(--color-primary); font-size: 1.5rem;">→</div>
+                <div class="card animate-in" style="text-align: center; padding: 32px 40px; min-width: 200px;">
+                    <div class="icon-circle icon-circle-blue" style="margin: 0 auto 16px;">⚡</div>
+                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 4px;">Generator</h3>
+                    <p style="font-size: 0.8125rem; color: var(--color-text-tertiary);">生成者</p>
+                </div>
+                <div style="color: var(--color-primary); font-size: 1.5rem;">→</div>
+                <div class="card animate-in" style="text-align: center; padding: 32px 40px; min-width: 200px;">
+                    <div class="icon-circle icon-circle-green" style="margin: 0 auto 16px;">🔧</div>
+                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 4px;">Healer</h3>
+                    <p style="font-size: 0.8125rem; color: var(--color-text-tertiary);">修复者</p>
+                </div>
+            </div>
+            <p class="animate-in" style="margin-top: 40px; font-size: 0.9375rem; color: var(--color-text-tertiary); max-width: 600px; line-height: 1.6;">
+                以前是你写代码让机器自动跑，<br>现在是你说需求让 AI 自动生成代码再自动跑
+            </p>
+        </div>
+        <div class="page-number">03 / 12</div>
+    </section>
+
+    <!-- ==================== P4: 三个 Agent 总览 ==================== -->
+    <section class="slide" data-slide="3">
+        <div class="slide-content">
+            <div class="animate-in">
+                <p style="font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-primary); font-weight: 600; margin-bottom: 12px; letter-spacing: 0.05em;">THREE AGENTS</p>
+                <h1 style="font-size: 2.75rem; font-weight: 700; line-height: 1.2; margin-bottom: 48px;">
+                    三个 Agent，各司其职
+                </h1>
+            </div>
+            <div class="stagger" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; flex: 1; align-items: start;">
+                <div class="card animate-in" style="border-top: 4px solid #8B5CF6;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                        <div class="icon-circle icon-circle-purple">🗺️</div>
+                        <div>
+                            <span class="agent-badge badge-planner">Planner</span>
+                        </div>
+                    </div>
+                    <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 8px;">规划者</h3>
+                    <p style="color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6; margin-bottom: 16px;">
+                        探索应用，产出 Markdown 格式的测试计划
+                    </p>
+                    <div style="background: var(--color-bg-secondary); border-radius: var(--radius-sm); padding: 12px 16px;">
+                        <p style="font-size: 0.8125rem; color: var(--color-text-tertiary); margin-bottom: 4px;">输入</p>
+                        <p style="font-size: 0.875rem; font-weight: 500;">任务描述 + seed 文件</p>
+                        <p style="font-size: 0.8125rem; color: var(--color-text-tertiary); margin: 8px 0 4px;">输出</p>
+                        <p style="font-size: 0.875rem; font-weight: 500;">specs/*.md 测试计划</p>
+                    </div>
+                </div>
+                <div class="card animate-in" style="border-top: 4px solid #3B82F6;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                        <div class="icon-circle icon-circle-blue">⚡</div>
+                        <div>
+                            <span class="agent-badge badge-generator">Generator</span>
+                        </div>
+                    </div>
+                    <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 8px;">生成者</h3>
+                    <p style="color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6; margin-bottom: 16px;">
+                        把测试计划转成可执行的 Playwright 测试代码
+                    </p>
+                    <div style="background: var(--color-bg-secondary); border-radius: var(--radius-sm); padding: 12px 16px;">
+                        <p style="font-size: 0.8125rem; color: var(--color-text-tertiary); margin-bottom: 4px;">输入</p>
+                        <p style="font-size: 0.875rem; font-weight: 500;">specs/ 下的 Markdown 计划</p>
+                        <p style="font-size: 0.8125rem; color: var(--color-text-tertiary); margin: 8px 0 4px;">输出</p>
+                        <p style="font-size: 0.875rem; font-weight: 500;">tests/*.spec.ts 测试代码</p>
+                    </div>
+                </div>
+                <div class="card animate-in" style="border-top: 4px solid #10B981;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                        <div class="icon-circle icon-circle-green">🔧</div>
+                        <div>
+                            <span class="agent-badge badge-healer">Healer</span>
+                        </div>
+                    </div>
+                    <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 8px;">修复者</h3>
+                    <p style="color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6; margin-bottom: 16px;">
+                        跑失败的测试，自动找原因，自动打补丁修好
+                    </p>
+                    <div style="background: var(--color-bg-secondary); border-radius: var(--radius-sm); padding: 12px 16px;">
+                        <p style="font-size: 0.8125rem; color: var(--color-text-tertiary); margin-bottom: 4px;">输入</p>
+                        <p style="font-size: 0.875rem; font-weight: 500;">失败的测试文件</p>
+                        <p style="font-size: 0.8125rem; color: var(--color-text-tertiary); margin: 8px 0 4px;">输出</p>
+                        <p style="font-size: 0.875rem; font-weight: 500;">修复后的测试代码</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">04 / 12</div>
+    </section>
+
+    <!-- ==================== P5: Planner 详解 ==================== -->
+    <section class="slide" data-slide="4">
+        <div class="slide-content">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 64px; flex: 1; align-items: center;">
+                <div class="animate-in">
+                    <span class="agent-badge badge-planner" style="margin-bottom: 20px;">Planner · 规划者</span>
+                    <h2 style="font-size: 2.25rem; font-weight: 700; line-height: 1.2; margin-top: 16px; margin-bottom: 24px;">
+                        先探路，<br>再规划
+                    </h2>
+                    <p style="color: var(--color-text-secondary); font-size: 1rem; line-height: 1.7; margin-bottom: 24px;">
+                        Planner 会先跑 seed 测试配置环境，然后在此基础上探索应用，把 seed 文件当作后续生成测试的风格模板。
+                    </p>
+                    <div style="display: flex; flex-direction: column; gap: 16px;">
+                        <div style="display: flex; gap: 12px; align-items: flex-start;">
+                            <div class="icon-circle icon-circle-purple" style="width: 36px; height: 36px; font-size: 1rem;">1</div>
+                            <div>
+                                <p style="font-weight: 600; font-size: 0.9375rem;">接收清晰的任务描述</p>
+                                <p style="color: var(--color-text-tertiary); font-size: 0.8125rem;">如"给访客结账流程生成测试计划"</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: flex-start;">
+                            <div class="icon-circle icon-circle-purple" style="width: 36px; height: 36px; font-size: 1rem;">2</div>
+                            <div>
+                                <p style="font-weight: 600; font-size: 0.9375rem;">探索应用，了解页面结构</p>
+                                <p style="color: var(--color-text-tertiary); font-size: 0.8125rem;">自动识别可测试的元素和流程</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: flex-start;">
+                            <div class="icon-circle icon-circle-purple" style="width: 36px; height: 36px; font-size: 1rem;">3</div>
+                            <div>
+                                <p style="font-weight: 600; font-size: 0.9375rem;">输出人类可读的测试计划</p>
+                                <p style="color: var(--color-text-tertiary); font-size: 0.8125rem;">Markdown 格式，场景、步骤、预期一目了然</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="animate-in">
+                    <div class="code-block">
+                        <p style="margin-bottom: 4px;"><span class="comment">// seed.spec.ts 示例</span></p>
+                        <p><span class="keyword">import</span> { test, expect } <span class="keyword">from</span> <span class="string">'./fixtures'</span>;</p>
+                        <br>
+                        <p><span class="func">test</span>(<span class="string">'seed'</span>, <span class="keyword">async</span> ({ page }) => {</p>
+                        <p style="padding-left: 20px;"><span class="comment">// 在这里处理登录、初始化等准备工作</span></p>
+                        <p style="padding-left: 20px;"><span class="comment">// 这个测试本身不需要有断言</span></p>
+                        <p>});</p>
+                    </div>
+                    <div class="tip-card" style="margin-top: 16px;">
+                        <span style="font-size: 1.25rem; flex-shrink: 0;">💡</span>
+                        <div>
+                            <p style="font-size: 0.8125rem; font-weight: 600; margin-bottom: 2px;">Seed 文件是整个流程的基础</p>
+                            <p style="font-size: 0.8125rem; color: var(--color-text-secondary);">应用需要登录但 seed 没处理，Planner 探索时会撞墙</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">05 / 12</div>
+    </section>
+
+    <!-- ==================== P6: Generator 详解 ==================== -->
+    <section class="slide" data-slide="5">
+        <div class="slide-content">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 64px; flex: 1; align-items: center;">
+                <div class="animate-in">
+                    <span class="agent-badge badge-generator" style="margin-bottom: 20px;">Generator · 生成者</span>
+                    <h2 style="font-size: 2.25rem; font-weight: 700; line-height: 1.2; margin-top: 16px; margin-bottom: 24px;">
+                        计划 → <br>可执行代码
+                    </h2>
+                    <p style="color: var(--color-text-secondary); font-size: 1rem; line-height: 1.7; margin-bottom: 24px;">
+                        Generator 在生成过程中会<strong style="color: var(--color-primary);">实时验证</strong>——真的操作浏览器，确认选择器有效、断言合理。生成完就是能跑的代码（大部分情况）。
+                    </p>
+                    <div style="display: flex; flex-direction: column; gap: 16px;">
+                        <div style="display: flex; gap: 12px; align-items: flex-start;">
+                            <div class="icon-circle icon-circle-blue" style="width: 36px; height: 36px; font-size: 1rem;">📥</div>
+                            <div>
+                                <p style="font-weight: 600; font-size: 0.9375rem;">读取 specs/ 下的 Markdown 计划</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: flex-start;">
+                            <div class="icon-circle icon-circle-blue" style="width: 36px; height: 36px; font-size: 1rem;">🔍</div>
+                            <div>
+                                <p style="font-weight: 600; font-size: 0.9375rem;">实时操作浏览器验证选择器</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: flex-start;">
+                            <div class="icon-circle icon-circle-blue" style="width: 36px; height: 36px; font-size: 1rem;">📤</div>
+                            <div>
+                                <p style="font-weight: 600; font-size: 0.9375rem;">输出 tests/*.spec.ts，与计划一一对应</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="animate-in">
+                    <div class="code-block">
+                        <p style="margin-bottom: 8px;"><span class="comment">// 告诉 Generator：</span></p>
+                        <p style="margin-bottom: 16px;"><span class="string">"把 specs/basic-operations.md</span></p>
+                        <p style="margin-bottom: 16px;"><span class="string"> 里的测试计划生成为测试代码"</span></p>
+                        <br>
+                        <p style="margin-bottom: 8px;"><span class="comment">// Generator 输出：</span></p>
+                        <p>tests/</p>
+                        <p style="padding-left: 20px;">├── add-valid-todo.spec.ts</p>
+                        <p style="padding-left: 20px;">├── edit-todo.spec.ts</p>
+                        <p style="padding-left: 20px;">└── delete-todo.spec.ts</p>
+                    </div>
+                    <div style="background: #EDE9FE; border-radius: var(--radius-md); padding: 16px 20px; margin-top: 16px;">
+                        <p style="font-size: 0.875rem; font-weight: 600; color: #6D28D9;">关键特性</p>
+                        <p style="font-size: 0.8125rem; color: #7C3AED; margin-top: 4px;">生成过程中真的操作浏览器，确认选择器有效、断言合理</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">06 / 12</div>
+    </section>
+
+    <!-- ==================== P7: Healer 详解 ==================== -->
+    <section class="slide" data-slide="6">
+        <div class="slide-content">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 64px; flex: 1; align-items: center;">
+                <div class="animate-in">
+                    <span class="agent-badge badge-healer" style="margin-bottom: 20px;">Healer · 修复者</span>
+                    <h2 style="font-size: 2.25rem; font-weight: 700; line-height: 1.2; margin-top: 16px; margin-bottom: 24px;">
+                        测试挂了？<br>自动修
+                    </h2>
+                    <p style="color: var(--color-text-secondary); font-size: 1rem; line-height: 1.7; margin-bottom: 24px;">
+                        这是三个 Agent 里<strong style="color: #047857;">最省心的一个</strong>。跑失败的测试交给他，自动回放、诊断、打补丁。
+                    </p>
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <div style="width: 32px; height: 32px; border-radius: 50%; background: #D1FAE5; display: flex; align-items: center; justify-content: center; font-size: 0.8125rem; font-weight: 700; color: #047857; flex-shrink: 0;">1</div>
+                            <p style="font-size: 0.9375rem;">重新回放失败的测试步骤</p>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <div style="width: 32px; height: 32px; border-radius: 50%; background: #D1FAE5; display: flex; align-items: center; justify-content: center; font-size: 0.8125rem; font-weight: 700; color: #047857; flex-shrink: 0;">2</div>
+                            <p style="font-size: 0.9375rem;">查看当前 UI，找到对应的元素或流程</p>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <div style="width: 32px; height: 32px; border-radius: 50%; background: #D1FAE5; display: flex; align-items: center; justify-content: center; font-size: 0.8125rem; font-weight: 700; color: #047857; flex-shrink: 0;">3</div>
+                            <p style="font-size: 0.9375rem;">提出修复方案（更新选择器、调整等待、修改数据）</p>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <div style="width: 32px; height: 32px; border-radius: 50%; background: #D1FAE5; display: flex; align-items: center; justify-content: center; font-size: 0.8125rem; font-weight: 700; color: #047857; flex-shrink: 0;">4</div>
+                            <p style="font-size: 0.9375rem;">重新跑测试，直到通过</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="animate-in">
+                    <div class="code-block">
+                        <p style="margin-bottom: 16px;"><span class="comment">// 告诉 Healer：</span></p>
+                        <p style="margin-bottom: 16px;"><span class="string">"帮我修复 tests/add-valid-todo.spec.ts</span></p>
+                        <p style="margin-bottom: 16px;"><span class="string"> 里失败的测试"</span></p>
+                    </div>
+                    <div class="warning-card" style="margin-top: 20px;">
+                        <span style="font-size: 1.25rem; flex-shrink: 0;">⚠️</span>
+                        <div>
+                            <p style="font-size: 0.8125rem; font-weight: 600; color: #92400E; margin-bottom: 4px;">Healer 的能力边界</p>
+                            <p style="font-size: 0.8125rem; color: #A16207;">选择器大范围改动、功能逻辑变了、接口 schema 变了 —— 这些靠 Healer 修不了。它处理的是"能跑但跑失败了"这类问题。</p>
+                        </div>
+                    </div>
+                    <div style="background: var(--color-bg-secondary); border-radius: var(--radius-md); padding: 16px 20px; margin-top: 16px;">
+                        <p style="font-size: 0.8125rem; color: var(--color-text-tertiary);">多次修复仍不行时，Healer 会标记为 <code style="background: #FEE2E2; color: #DC2626; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.75rem;">skip</code> 并注明功能本身可能有问题</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">07 / 12</div>
+    </section>
+
+    <!-- ==================== P8: 完整工作流 ==================== -->
+    <section class="slide" data-slide="7">
+        <div class="slide-content">
+            <div class="animate-in">
+                <p style="font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-primary); font-weight: 600; margin-bottom: 12px; letter-spacing: 0.05em;">WORKFLOW</p>
+                <h1 style="font-size: 2.75rem; font-weight: 700; line-height: 1.2; margin-bottom: 16px;">
+                    完整工作流：Agentic Loop
+                </h1>
+                <p style="color: var(--color-text-secondary); font-size: 1rem; margin-bottom: 40px;">三个 Agent 接力，你主要在<strong style="color: var(--color-primary);">审核</strong>，不在执行</p>
+            </div>
+            <div class="stagger" style="display: flex; flex-direction: column; gap: 0; flex: 1;">
+                <div class="animate-in" style="display: flex; gap: 20px; align-items: stretch;">
+                    <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
+                        <div style="width: 44px; height: 44px; border-radius: 50%; background: #EDE9FE; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #6D28D9; font-size: 0.875rem;">1</div>
+                        <div style="width: 2px; flex: 1; background: linear-gradient(to bottom, #8B5CF6, #3B82F6); margin: 4px 0;"></div>
+                    </div>
+                    <div style="padding-bottom: 24px; flex: 1;">
+                        <h3 style="font-size: 1.0625rem; font-weight: 600; margin-bottom: 4px;">写好 seed.spec.ts</h3>
+                        <p style="font-size: 0.875rem; color: var(--color-text-secondary);">处理环境初始化（登录、数据准备等）</p>
+                    </div>
+                </div>
+                <div class="animate-in" style="display: flex; gap: 20px; align-items: stretch;">
+                    <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
+                        <div style="width: 44px; height: 44px; border-radius: 50%; background: #EDE9FE; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #6D28D9; font-size: 0.875rem;">2</div>
+                        <div style="width: 2px; flex: 1; background: linear-gradient(to bottom, #8B5CF6, #3B82F6); margin: 4px 0;"></div>
+                    </div>
+                    <div style="padding-bottom: 24px; flex: 1;">
+                        <h3 style="font-size: 1.0625rem; font-weight: 600; margin-bottom: 4px;"><span class="agent-badge badge-planner" style="font-size: 0.75rem;">Planner</span> 探索应用，输出测试计划</h3>
+                        <p style="font-size: 0.875rem; color: var(--color-text-secondary);">"给购物车模块生成测试计划" → specs/cart-operations.md</p>
+                    </div>
+                </div>
+                <div class="animate-in" style="display: flex; gap: 20px; align-items: stretch;">
+                    <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
+                        <div style="width: 44px; height: 44px; border-radius: 50%; background: #DBEAFE; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #1D4ED8; font-size: 0.875rem;">3</div>
+                        <div style="width: 2px; flex: 1; background: linear-gradient(to bottom, #3B82F6, #10B981); margin: 4px 0;"></div>
+                    </div>
+                    <div style="padding-bottom: 24px; flex: 1;">
+                        <h3 style="font-size: 1.0625rem; font-weight: 600; margin-bottom: 4px;">人工审核计划（可选）</h3>
+                        <p style="font-size: 0.875rem; color: var(--color-text-secondary);">检查 specs/ 下的计划文件，觉得 OK 就放行</p>
+                    </div>
+                </div>
+                <div class="animate-in" style="display: flex; gap: 20px; align-items: stretch;">
+                    <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
+                        <div style="width: 44px; height: 44px; border-radius: 50%; background: #DBEAFE; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #1D4ED8; font-size: 0.875rem;">4</div>
+                        <div style="width: 2px; flex: 1; background: linear-gradient(to bottom, #3B82F6, #10B981); margin: 4px 0;"></div>
+                    </div>
+                    <div style="padding-bottom: 24px; flex: 1;">
+                        <h3 style="font-size: 1.0625rem; font-weight: 600; margin-bottom: 4px;"><span class="agent-badge badge-generator" style="font-size: 0.75rem;">Generator</span> 生成可执行测试代码</h3>
+                        <p style="font-size: 0.875rem; color: var(--color-text-secondary);">计划 → tests/*.spec.ts，实时验证选择器有效</p>
+                    </div>
+                </div>
+                <div class="animate-in" style="display: flex; gap: 20px; align-items: stretch;">
+                    <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
+                        <div style="width: 44px; height: 44px; border-radius: 50%; background: #D1FAE5; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #047857; font-size: 0.875rem;">5</div>
+                        <div style="width: 2px; flex: 1; background: linear-gradient(to bottom, #10B981, #06B6D4); margin: 4px 0;"></div>
+                    </div>
+                    <div style="padding-bottom: 24px; flex: 1;">
+                        <h3 style="font-size: 1.0625rem; font-weight: 600; margin-bottom: 4px;">跑测试，有失败的？<span class="agent-badge badge-healer" style="font-size: 0.75rem;">Healer</span> 去修</h3>
+                        <p style="font-size: 0.875rem; color: var(--color-text-secondary);">自动回放、诊断、打补丁，修不好标记 skip</p>
+                    </div>
+                </div>
+                <div class="animate-in" style="display: flex; gap: 20px; align-items: center;">
+                    <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
+                        <div style="width: 44px; height: 44px; border-radius: 50%; background: #CFFAFE; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #0E7490; font-size: 0.875rem;">6</div>
+                    </div>
+                    <div>
+                        <h3 style="font-size: 1.0625rem; font-weight: 600; margin-bottom: 4px;">全部通过，合并进代码仓库 ✅</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">08 / 12</div>
+    </section>
+
+    <!-- ==================== P9: 快速开始 ==================== -->
+    <section class="slide" data-slide="8">
+        <div class="slide-content">
+            <div class="animate-in">
+                <p style="font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-primary); font-weight: 600; margin-bottom: 12px; letter-spacing: 0.05em;">QUICK START</p>
+                <h1 style="font-size: 2.75rem; font-weight: 700; line-height: 1.2; margin-bottom: 12px;">
+                    快速开始
+                </h1>
+                <p style="color: var(--color-text-secondary); font-size: 1rem; margin-bottom: 40px;">一条命令初始化，之后在 AI 编码工具里直接用</p>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px; flex: 1;">
+                <div class="animate-in" style="display: flex; flex-direction: column; gap: 24px;">
+                    <div>
+                        <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 12px;">初始化 Agent 定义文件</h3>
+                        <div class="code-block">
+                            <p><span class="comment"># VS Code 模式（默认）</span></p>
+                            <p>npx playwright init-agents</p>
+                            <br>
+                            <p><span class="comment"># Claude Code 模式</span></p>
+                            <p>npx playwright init-agents <span class="string">--loop=claude</span></p>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 12px;">生成的目录结构</h3>
+                        <div class="code-block">
+                            <p>repo/</p>
+                            <p style="padding-left: 20px;">.github/ <span class="comment"># Agent 定义文件</span></p>
+                            <p style="padding-left: 20px;">specs/ <span class="comment"># 人类可读的测试计划</span></p>
+                            <p style="padding-left: 40px;">basic-operations.md</p>
+                            <p style="padding-left: 40px;">cart-operations.md</p>
+                            <p style="padding-left: 20px;">tests/ <span class="comment"># 生成的测试代码</span></p>
+                            <p style="padding-left: 40px;">add-valid-todo.spec.ts</p>
+                            <p style="padding-left: 20px;">seed.spec.ts <span class="comment"># 种子测试</span></p>
+                            <p style="padding-left: 20px;">playwright.config.ts</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="animate-in" style="display: flex; flex-direction: column; gap: 24px;">
+                    <div class="tip-card">
+                        <span style="font-size: 1.25rem; flex-shrink: 0;">💡</span>
+                        <div>
+                            <p style="font-size: 0.875rem; font-weight: 600; margin-bottom: 4px;">VS Code 版本要求</p>
+                            <p style="font-size: 0.8125rem; color: var(--color-text-secondary);">需要 <strong>v1.105</strong>（2025 年 10 月 9 日之后）才能完整支持 Test Agents</p>
+                        </div>
+                    </div>
+                    <div class="warning-card">
+                        <span style="font-size: 1.25rem; flex-shrink: 0;">⚠️</span>
+                        <div>
+                            <p style="font-size: 0.875rem; font-weight: 600; color: #92400E; margin-bottom: 4px;">版本升级注意</p>
+                            <p style="font-size: 0.8125rem; color: #A16207;">Playwright 版本更新后要重新跑 <code style="background: #FEF3C7; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.75rem;">init-agents</code>，定义文件不会自动同步</p>
+                        </div>
+                    </div>
+                    <div class="card" style="border-left: 4px solid var(--color-accent);">
+                        <h3 style="font-size: 1.0625rem; font-weight: 600; margin-bottom: 12px;">计划与测试一一对应</h3>
+                        <p style="font-size: 0.875rem; color: var(--color-text-secondary); line-height: 1.6;">
+                            测试失败了，去 <code style="background: var(--color-bg-secondary); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.75rem;">specs/</code> 找对应计划，看是需求层面还是代码层面的问题。出了问题方便追溯。
+                        </p>
+                    </div>
+                    <div class="card" style="border-left: 4px solid var(--color-primary);">
+                        <h3 style="font-size: 1.0625rem; font-weight: 600; margin-bottom: 12px;">三个 Agent 可灵活组合</h3>
+                        <p style="font-size: 0.875rem; color: var(--color-text-secondary); line-height: 1.6;">
+                            可以单独用、按顺序接力、或串成自动化循环。不需要全流程走完，按需调用即可。
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">09 / 12</div>
+    </section>
+
+    <!-- ==================== P10: MCP vs CLI vs Agents 对比 ==================== -->
+    <section class="slide" data-slide="9">
+        <div class="slide-content">
+            <div class="animate-in">
+                <p style="font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-primary); font-weight: 600; margin-bottom: 12px; letter-spacing: 0.05em;">COMPARISON</p>
+                <h1 style="font-size: 2.75rem; font-weight: 700; line-height: 1.2; margin-bottom: 32px;">
+                    MCP vs CLI vs Test Agents
+                </h1>
+            </div>
+            <div class="animate-in" style="margin-bottom: 32px;">
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 18%;">维度</th>
+                            <th style="width: 24%;">MCP</th>
+                            <th style="width: 24%;">CLI</th>
+                            <th style="width: 34%;" class="highlight-cell">Test Agents</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="font-weight: 600;">本质</td>
+                            <td>给 AI 装了"眼睛"</td>
+                            <td>给 AI 装了"手脚"</td>
+                            <td class="highlight-cell">自主 AI 系统</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">控制权</td>
+                            <td>你指挥，AI 执行</td>
+                            <td>AI 自主执行命令</td>
+                            <td class="highlight-cell">AI 自主完成目标</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">交互方式</td>
+                            <td>对话式，逐步</td>
+                            <td>命令式，可批量</td>
+                            <td class="highlight-cell">目标式，自主规划</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">Token 消耗</td>
+                            <td>高（页面快照）</td>
+                            <td>低（结构化命令）</td>
+                            <td class="highlight-cell">中（有中间产物）</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">适合粒度</td>
+                            <td>单个测试 / 操作</td>
+                            <td>批量操作 / 流程节点</td>
+                            <td class="highlight-cell">模块级 / 项目级</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">人工介入</td>
+                            <td>全程在场</td>
+                            <td>不需要介入</td>
+                            <td class="highlight-cell">关键节点审核即可</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="stagger" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+                <div class="card animate-in" style="text-align: center; padding: 24px;">
+                    <p style="font-size: 0.875rem; font-weight: 600; margin-bottom: 4px;">MCP</p>
+                    <p style="font-size: 0.8125rem; color: var(--color-text-secondary);">写单个测试找 MCP</p>
+                </div>
+                <div class="card animate-in" style="text-align: center; padding: 24px;">
+                    <p style="font-size: 0.875rem; font-weight: 600; margin-bottom: 4px;">CLI</p>
+                    <p style="font-size: 0.8125rem; color: var(--color-text-secondary);">搭自动化流程用 CLI</p>
+                </div>
+                <div class="card animate-in" style="text-align: center; padding: 24px; border-color: var(--color-primary);">
+                    <p style="font-size: 0.875rem; font-weight: 600; color: var(--color-primary); margin-bottom: 4px;">Test Agents</p>
+                    <p style="font-size: 0.8125rem; color: var(--color-text-secondary);">建整体测试覆盖上 Agents</p>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">10 / 12</div>
+    </section>
+
+    <!-- ==================== P11: 注意事项 ==================== -->
+    <section class="slide" data-slide="10">
+        <div class="slide-content">
+            <div class="animate-in">
+                <p style="font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-primary); font-weight: 600; margin-bottom: 12px; letter-spacing: 0.05em;">BEST PRACTICES</p>
+                <h1 style="font-size: 2.75rem; font-weight: 700; line-height: 1.2; margin-bottom: 40px;">
+                    实战注意事项
+                </h1>
+            </div>
+            <div class="stagger" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; flex: 1; align-items: start;">
+                <div class="card animate-in" style="border-top: 4px solid #EF4444;">
+                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        <span style="font-size: 1.5rem; flex-shrink: 0;">🔥</span>
+                        <div>
+                            <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">Seed 文件一定要写好</h3>
+                            <p style="color: var(--color-text-secondary); font-size: 0.875rem; line-height: 1.6;">整个 Agent 流程的基础。应用需要登录但 seed 没处理，Planner 探索时会撞墙。花时间把 seed 写扎实，后面事半功倍。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="card animate-in" style="border-top: 4px solid #F59E0B;">
+                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        <span style="font-size: 1.5rem; flex-shrink: 0;">🔄</span>
+                        <div>
+                            <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">定义文件跟着版本走</h3>
+                            <p style="color: var(--color-text-secondary); font-size: 0.875rem; line-height: 1.6;">每次升级 Playwright 后重新跑 <code style="background: var(--color-bg-secondary); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.75rem;">init-agents</code>，定义文件不会自动同步。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="card animate-in" style="border-top: 4px solid #8B5CF6;">
+                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        <span style="font-size: 1.5rem; flex-shrink: 0;">🛡️</span>
+                        <div>
+                            <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">Healer 不是万能的</h3>
+                            <p style="color: var(--color-text-secondary); font-size: 0.875rem; line-height: 1.6;">选择器大范围改动、功能逻辑变了、接口 schema 变了 —— 这些需要人工介入。Healer 处理的是"能跑、跑失败了"的情况。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="card animate-in" style="border-top: 4px solid var(--color-accent);">
+                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        <span style="font-size: 1.5rem; flex-shrink: 0;">👀</span>
+                        <div>
+                            <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">生成的代码要过一遍眼</h3>
+                            <p style="color: var(--color-text-secondary); font-size: 0.875rem; line-height: 1.6;">断言力度够不够、边界情况有没有覆盖、测试间是否有依赖 —— 这些仍需人判断。AI 生成 ≠ 免审查。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="page-number">11 / 12</div>
+    </section>
+
+    <!-- ==================== P12: 总结 & Q&A ==================== -->
+    <section class="slide" data-slide="11">
+        <div class="end-bg"></div>
+        <div class="slide-content" style="justify-content: center; align-items: center; text-align: center;">
+            <div class="animate-in">
+                <p style="font-family: var(--font-mono); font-size: 0.8125rem; color: #A78BFA; font-weight: 600; margin-bottom: 24px; letter-spacing: 0.05em;">RECAP</p>
+                <h1 style="font-size: 3rem; font-weight: 700; line-height: 1.2; color: #FFFFFF; margin-bottom: 40px;">
+                    核心要点回顾
+                </h1>
+            </div>
+            <div class="stagger" style="display: flex; gap: 40px; justify-content: center; margin-bottom: 56px; flex-wrap: wrap;">
+                <div class="animate-in" style="text-align: center;">
+                    <div class="icon-circle icon-circle-purple" style="margin: 0 auto 12px; width: 64px; height: 64px; font-size: 1.75rem;">🗺️</div>
+                    <p style="color: #C4B5FD; font-weight: 600; font-size: 0.9375rem;">Planner</p>
+                    <p style="color: #94A3B8; font-size: 0.8125rem; margin-top: 4px;">探索 → 测试计划</p>
+                </div>
+                <div class="animate-in" style="text-align: center;">
+                    <div class="icon-circle icon-circle-blue" style="margin: 0 auto 12px; width: 64px; height: 64px; font-size: 1.75rem;">⚡</div>
+                    <p style="color: #93C5FD; font-weight: 600; font-size: 0.9375rem;">Generator</p>
+                    <p style="color: #94A3B8; font-size: 0.8125rem; margin-top: 4px;">计划 → 测试代码</p>
+                </div>
+                <div class="animate-in" style="text-align: center;">
+                    <div class="icon-circle icon-circle-green" style="margin: 0 auto 12px; width: 64px; height: 64px; font-size: 1.75rem;">🔧</div>
+                    <p style="color: #6EE7B7; font-weight: 600; font-size: 0.9375rem;">Healer</p>
+                    <p style="color: #94A3B8; font-size: 0.8125rem; margin-top: 4px;">失败 → 自动修复</p>
+                </div>
+            </div>
+            <div class="animate-in" style="background: rgba(255,255,255,0.08); border-radius: var(--radius-lg); padding: 20px 32px; margin-bottom: 40px;">
+                <code style="color: #22D3EE; font-family: var(--font-mono); font-size: 1rem;">npx playwright init-agents</code>
+            </div>
+            <div class="animate-in">
+                <p style="font-size: 2.25rem; font-weight: 700; color: #FFFFFF; margin-bottom: 16px;">Q & A</p>
+                <p style="color: #94A3B8; font-size: 0.9375rem;">感谢聆听，欢迎提问</p>
+            </div>
+        </div>
+        <div class="page-number" style="color: #475569;">12 / 12</div>
+    </section>
+
+    <!-- ==================== 交互控件 ==================== -->
+    <button id="fullscreen-btn" class="control-btn" aria-label="全屏模式">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
+    </button>
+
+    <div id="nav-arrows">
+        <button id="arrow-up" class="control-btn" aria-label="上一页">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="18 15 12 9 6 15"/>
+            </svg>
+        </button>
+        <button id="arrow-down" class="control-btn" aria-label="下一页">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+            </svg>
+        </button>
+    </div>
+
+    <nav id="slide-indicator" aria-label="幻灯片导航"></nav>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // ===== 导航控制器 =====
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+        let currentSlide = 0;
+        let isScrolling = false;
+        const SCROLL_COOLDOWN = 800;
+
+        function navigateTo(index) {
+            if (index < 0 || index >= totalSlides || isScrolling) return;
+            isScrolling = true;
+            currentSlide = index;
+            slides[index].scrollIntoView({ behavior: 'smooth' });
+            updateControls();
+            setTimeout(() => { isScrolling = false; }, SCROLL_COOLDOWN);
+        }
+
+        function updateControls() {
+            document.getElementById('arrow-up').classList.toggle('disabled', currentSlide === 0);
+            document.getElementById('arrow-down').classList.toggle('disabled', currentSlide === totalSlides - 1);
+            document.querySelectorAll('.indicator-dot').forEach((dot, i) => {
+                dot.classList.toggle('active', i === currentSlide);
+            });
+            const counter = document.getElementById('slide-counter');
+            if (counter) counter.textContent = `${currentSlide + 1} / ${totalSlides}`;
+        }
+
+        // ===== 生成指示器 =====
+        const indicator = document.getElementById('slide-indicator');
+        slides.forEach((_, i) => {
+            const dot = document.createElement('div');
+            dot.className = 'indicator-dot' + (i === 0 ? ' active' : '');
+            dot.addEventListener('click', () => navigateTo(i));
+            indicator.appendChild(dot);
+        });
+        const counter = document.createElement('div');
+        counter.id = 'slide-counter';
+        counter.textContent = `1 / ${totalSlides}`;
+        indicator.appendChild(counter);
+
+        // ===== 滚轮导航 =====
+        window.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            if (e.deltaY > 0) navigateTo(currentSlide + 1);
+            else if (e.deltaY < 0) navigateTo(currentSlide - 1);
+        }, { passive: false });
+
+        // ===== 键盘导航 =====
+        window.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'ArrowDown': case 'PageDown': case ' ':
+                    e.preventDefault(); navigateTo(currentSlide + 1); break;
+                case 'ArrowUp': case 'PageUp':
+                    e.preventDefault(); navigateTo(currentSlide - 1); break;
+                case 'Home':
+                    e.preventDefault(); navigateTo(0); break;
+                case 'End':
+                    e.preventDefault(); navigateTo(totalSlides - 1); break;
+            }
+        });
+
+        // ===== 触摸导航 =====
+        let touchStartY = 0;
+        window.addEventListener('touchstart', (e) => { touchStartY = e.touches[0].clientY; });
+        window.addEventListener('touchend', (e) => {
+            const diff = touchStartY - e.changedTouches[0].clientY;
+            if (Math.abs(diff) > 50) {
+                diff > 0 ? navigateTo(currentSlide + 1) : navigateTo(currentSlide - 1);
+            }
+        });
+
+        // ===== 箭头点击 =====
+        document.getElementById('arrow-up').addEventListener('click', () => navigateTo(currentSlide - 1));
+        document.getElementById('arrow-down').addEventListener('click', () => navigateTo(currentSlide + 1));
+
+        // ===== 全屏控制 =====
+        const fsBtn = document.getElementById('fullscreen-btn');
+        const fsIconEnter = '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>';
+        const fsIconExit = '<path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>';
+
+        fsBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        });
+        document.addEventListener('fullscreenchange', () => {
+            fsBtn.querySelector('svg').innerHTML = document.fullscreenElement ? fsIconExit : fsIconEnter;
+        });
+
+        // ===== 入场动画观察器 =====
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.querySelectorAll('.animate-in').forEach(el => el.classList.add('visible'));
+                }
+            });
+        }, { threshold: 0.3 });
+        slides.forEach(slide => observer.observe(slide));
+
+        // ===== 初始化 =====
+        updateControls();
+        slides[0].querySelectorAll('.animate-in').forEach(el => el.classList.add('visible'));
+    })();
+    </script>
+</body>
+</html>
